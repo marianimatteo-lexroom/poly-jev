@@ -7,19 +7,14 @@ from web3.middleware import ExtraDataToPOAMiddleware
 
 from .config import Settings
 
-try:
-    from py_clob_client.config import ContractConfig, get_contract_config
-except ImportError as exc:  # pragma: no cover
-    raise ImportError("Install the 'live' extra (`pip install -e '.[live]'`) to use onboarding.py") from exc
+# Current Polymarket collateral token (replaces the deprecated USDC.e-direct
+# model): https://docs.polymarket.com/concepts/pusd — pUSD is a standard
+# ERC-20 wrapper backed by USDC, minted via the CollateralOnramp contract.
+# Address confirmed against Polymarket's own published contracts page
+# (docs.polymarket.com/resources/contracts) on 2026-09-19.
+_PUSD_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 
-_ERC20_ABI = [
-    {
-        "constant": True,
-        "inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
-        "name": "allowance",
-        "outputs": [{"name": "", "type": "uint256"}],
-        "type": "function",
-    },
+_ERC20_BALANCE_ABI = [
     {
         "constant": True,
         "inputs": [{"name": "owner", "type": "address"}],
@@ -27,61 +22,22 @@ _ERC20_ABI = [
         "outputs": [{"name": "", "type": "uint256"}],
         "type": "function",
     },
-    {
-        "constant": False,
-        "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
-        "name": "approve",
-        "outputs": [{"name": "", "type": "bool"}],
-        "type": "function",
-    },
 ]
-
-_ERC1155_ABI = [
-    {
-        "constant": True,
-        "inputs": [{"name": "account", "type": "address"}, {"name": "operator", "type": "address"}],
-        "name": "isApprovedForAll",
-        "outputs": [{"name": "", "type": "bool"}],
-        "type": "function",
-    },
-    {
-        "constant": False,
-        "inputs": [{"name": "operator", "type": "address"}, {"name": "approved", "type": "bool"}],
-        "name": "setApprovalForAll",
-        "outputs": [],
-        "type": "function",
-    },
-]
-
-# Polymarket's CLOB needs approvals against both the standard exchange and
-# the "neg-risk" exchange (used for multi-outcome markets grouped into a
-# single negative-risk contract) — a market's `negRisk` flag decides which
-# one an order for it needs. Trading a mix of markets means approving both.
-_USDC_MAX_ALLOWANCE = 2**256 - 1
-
-
-@dataclass(frozen=True)
-class ExchangeApprovalStatus:
-    label: str
-    exchange_address: str
-    usdc_allowance: int
-    ctf_approved: bool
-
-    @property
-    def ready(self) -> bool:
-        return self.usdc_allowance > 0 and self.ctf_approved
 
 
 @dataclass(frozen=True)
 class WalletStatus:
     address: str
-    usdc_balance: float
+    pusd_balance: float
     matic_balance: float
-    exchanges: list[ExchangeApprovalStatus]
 
     @property
     def ready_to_trade(self) -> bool:
-        return all(e.ready for e in self.exchanges) and self.usdc_balance > 0 and self.matic_balance > 0
+        # The current SDK (polymarket-client) sets any missing token
+        # allowance itself the first time you place an order — there is no
+        # separate manual-approval step to check here anymore. MATIC is
+        # still needed to pay gas for that first approval + each order.
+        return self.pusd_balance > 0 and self.matic_balance > 0
 
 
 def _web3(settings: Settings) -> Web3:
@@ -94,80 +50,21 @@ def _web3(settings: Settings) -> Web3:
 
 
 def check_wallet(settings: Settings, address: str) -> WalletStatus:
-    """Read-only: reports USDC/MATIC balances and current approval status
-    against both Polymarket exchange contracts. Needs only a public
-    address — never a private key."""
+    """Read-only: reports pUSD (Polymarket's trading collateral) and MATIC
+    (for gas) balances. Needs only a public address — never a private key.
+
+    Note: if you deposited through polymarket.com, your tradeable balance
+    lives here as pUSD already — you should NOT need to wrap anything
+    yourself. If this shows 0 pUSD despite having deposited, check whether
+    your funds landed in a separate Deposit Wallet address rather than this
+    EOA (see README) before assuming something is wrong.
+    """
     w3 = _web3(settings)
     checksum_address = Web3.to_checksum_address(address)
-
-    regular = get_contract_config(137, neg_risk=False)
-    neg_risk = get_contract_config(137, neg_risk=True)
-    usdc = w3.eth.contract(address=Web3.to_checksum_address(regular.collateral), abi=_ERC20_ABI)
-    ctf = w3.eth.contract(address=Web3.to_checksum_address(regular.conditional_tokens), abi=_ERC1155_ABI)
-
-    exchanges = []
-    for label, cfg in (("standard", regular), ("neg-risk", neg_risk)):
-        exchange_addr = Web3.to_checksum_address(cfg.exchange)
-        exchanges.append(
-            ExchangeApprovalStatus(
-                label=label,
-                exchange_address=exchange_addr,
-                usdc_allowance=usdc.functions.allowance(checksum_address, exchange_addr).call(),
-                ctf_approved=ctf.functions.isApprovedForAll(checksum_address, exchange_addr).call(),
-            )
-        )
+    pusd = w3.eth.contract(address=Web3.to_checksum_address(_PUSD_ADDRESS), abi=_ERC20_BALANCE_ABI)
 
     return WalletStatus(
         address=checksum_address,
-        usdc_balance=usdc.functions.balanceOf(checksum_address).call() / 1_000_000,  # USDC has 6 decimals
+        pusd_balance=pusd.functions.balanceOf(checksum_address).call() / 1_000_000,  # 6 decimals
         matic_balance=w3.eth.get_balance(checksum_address) / 1e18,
-        exchanges=exchanges,
     )
-
-
-def ensure_approvals(settings: Settings) -> list[str]:
-    """Sends whichever approve()/setApprovalForAll() transactions are
-    missing, for both the standard and neg-risk exchanges. Requires
-    POLYGON_WALLET_PRIVATE_KEY and MATIC in the wallet for gas. Returns the
-    tx hashes of whatever it actually sent (empty if already fully approved).
-    """
-    if not settings.polygon_private_key:
-        raise RuntimeError("POLYGON_WALLET_PRIVATE_KEY is not set")
-
-    w3 = _web3(settings)
-    account = w3.eth.account.from_key(settings.polygon_private_key)
-    address = account.address
-
-    status = check_wallet(settings, address)
-    regular = get_contract_config(137, neg_risk=False)
-    neg_risk = get_contract_config(137, neg_risk=True)
-    usdc = w3.eth.contract(address=Web3.to_checksum_address(regular.collateral), abi=_ERC20_ABI)
-    ctf = w3.eth.contract(address=Web3.to_checksum_address(regular.conditional_tokens), abi=_ERC1155_ABI)
-
-    tx_hashes: list[str] = []
-    nonce = w3.eth.get_transaction_count(address)
-
-    for exchange_status, cfg in zip(status.exchanges, (regular, neg_risk)):
-        exchange_addr = Web3.to_checksum_address(cfg.exchange)
-
-        if exchange_status.usdc_allowance == 0:
-            tx = usdc.functions.approve(exchange_addr, _USDC_MAX_ALLOWANCE).build_transaction(
-                {"from": address, "nonce": nonce, "chainId": 137}
-            )
-            nonce += 1
-            tx_hashes.append(_sign_and_send(w3, tx, account))
-
-        if not exchange_status.ctf_approved:
-            tx = ctf.functions.setApprovalForAll(exchange_addr, True).build_transaction(
-                {"from": address, "nonce": nonce, "chainId": 137}
-            )
-            nonce += 1
-            tx_hashes.append(_sign_and_send(w3, tx, account))
-
-    return tx_hashes
-
-
-def _sign_and_send(w3: Web3, tx: dict, account) -> str:
-    signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-    return tx_hash.hex()

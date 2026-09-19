@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from reflex.config import Settings
-from reflex.executor import Executor, ExecutorError, OrderRequest, _tick_size_str
+from reflex.executor import Executor, ExecutorError, OrderRequest
 from reflex.ledger import Ledger
 
 
@@ -21,14 +21,6 @@ def make_order(**overrides) -> OrderRequest:
     )
     base.update(overrides)
     return OrderRequest(**base)
-
-
-@pytest.mark.parametrize(
-    "value,expected",
-    [(0.01, "0.01"), (0.1, "0.1"), (0.001, "0.001"), (0.0001, "0.0001"), (0.005, "0.01")],
-)
-def test_tick_size_str_maps_known_values(value, expected):
-    assert _tick_size_str(value) == expected
 
 
 def test_execute_rejects_order_below_min_size(tmp_path):

@@ -10,10 +10,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Verified installable and working (build+sign a real approval tx, real
-# ClobClient order-construction calls) against py-clob-client==0.34.6 and
-# web3==8.0.0 while building this harness.
-live = ["py-clob-client>=0.34,<0.35", "web3>=8.0,<9"]
+# polymarket-client is Polymarket's current official SDK — it replaced
+# py-clob-client, which targets contracts/collateral (USDC.e direct) that
+# Polymarket's own docs now list as deprecated (see executor.py). web3 is
+# kept for the read-only pUSD/MATIC balance check in onboarding.py.
+live = ["polymarket-client>=0.10,<0.11", "web3<9"]
 dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]

@@ -9,8 +9,8 @@ from reflex.onboarding import check_wallet
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Read-only wallet check: USDC/MATIC balance and Polymarket exchange approvals. "
-        "Needs only a public address — never a private key."
+        description="Read-only wallet check: pUSD (Polymarket's trading collateral) and MATIC "
+        "balance. Needs only a public address — never a private key."
     )
     parser.add_argument(
         "--address",
@@ -27,19 +27,19 @@ def main() -> None:
     status = check_wallet(settings, address)
 
     print(f"Wallet: {status.address}")
-    print(f"  USDC:  {status.usdc_balance:,.2f}")
+    print(f"  pUSD:  {status.pusd_balance:,.2f}  (Polymarket's trading collateral)")
     print(f"  MATIC: {status.matic_balance:,.4f} (for gas)")
-    for exchange in status.exchanges:
-        state = "ready" if exchange.ready else "NOT ready"
-        print(f"  [{exchange.label}] {exchange.exchange_address} — {state}")
-        print(f"      USDC allowance: {exchange.usdc_allowance}")
-        print(f"      CTF approved:   {exchange.ctf_approved}")
-
     print()
     if status.ready_to_trade:
         print("Ready to trade.")
+    elif status.pusd_balance == 0:
+        print(
+            "No pUSD yet. Deposit through polymarket.com with this wallet connected — "
+            "that's the safest way to get USDC converted into pUSD correctly. "
+            "See README for why we don't do this step for you."
+        )
     else:
-        print("Not ready yet. Run scripts/onboard_wallet.py to send the missing approvals.")
+        print("Has pUSD but no MATIC for gas — fund it with a small amount of MATIC.")
 
 
 if __name__ == "__main__":

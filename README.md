@@ -14,12 +14,17 @@ Everything below was confirmed by hitting the real, live services while building
 |---|---|
 | Gamma API market schema (`polymarket_client.py`) | **Verified live** against `gamma-api.polymarket.com` — field names, types, `restricted`/`negRisk`/tick-size/min-order-size all confirmed on real markets |
 | Public CLOB price/book endpoints | **Verified live** — `/price`, `/book`, `/tick-size` all confirmed reachable, no auth needed |
-| Jev request/response shape (`jev_client.py`) | **Verified live**, using the real `typesafe-sdk` PyPI package (not a hand-rolled HTTP client) — confirmed the full request round-trip against `api.typesafe.ai` and got back a properly-typed `TypeSafeAuthenticationError` with a throwaway key. **A real `TYPESAFE_API_KEY` is the only thing needed to get an actual answer back instead of that error.** |
-| `py-clob-client` order construction (`executor.py`) | **Verified**: installed the real package (0.34.6), inspected its actual `ClobClient`/`OrderArgs`/`OrderType` signatures, and confirmed the code matches. Not exercised against a live order book — that needs a funded wallet |
-| USDC/CTF approvals (`onboarding.py`) | **Verified**: real contract addresses pulled live from `py_clob_client.config` (not hand-copied), a real approval transaction built and signed successfully against live Polygon gas estimation. Not broadcast — that needs your private key and MATIC for gas |
+| Jev request/response shape (`jev_client.py`) | **Verified live**, using the real `typesafe-sdk` PyPI package — confirmed the full request round-trip against `api.typesafe.ai`, including a real successful `Noul` answer with a live key |
+| Order execution (`executor.py`) | **Verified against Polymarket's current official SDK, `polymarket-client`** — real request construction confirmed by inspecting the installed package (0.10.0). Not exercised against a live fill — that needs a funded wallet |
+| Wallet balance check (`onboarding.py`) | **Verified live** — reads pUSD (Polymarket's current collateral token) and MATIC balance for a real address with no private key needed |
 | Mark-to-market risk (`reconcile.py`) | Implemented and unit-tested; open positions are priced against the live CLOB bid, not just resolved-market PnL |
 
-One correction from earlier: Gamma's `restricted` field looked like a useful "skip risky markets" safety filter, but it's `true` on 100% of the top 100 markets by volume — it's not a market-quality signal, and filtering on it made the scanner find nothing. It's captured on `BinaryMarket` but no longer filtered. **Check Polymarket's terms and your own jurisdiction's legal status yourself** — this flag doesn't tell you anything useful about that.
+**Two corrections made after the first pass, both worth knowing about:**
+
+1. Gamma's `restricted` field looked like a useful "skip risky markets" safety filter, but it's `true` on 100% of the top 100 markets by volume — it's not a market-quality signal, and filtering on it made the scanner find nothing. It's captured on `BinaryMarket` but no longer filtered. **Check Polymarket's terms and your own jurisdiction's legal status yourself** — this flag doesn't tell you anything useful about that.
+2. The first version of `executor.py`/`onboarding.py` was built and verified against `py-clob-client` — which turned out to be a **deprecated** package. Polymarket has since moved to an official unified SDK (`polymarket-client`) and a new collateral token, **pUSD** (replacing direct USDC.e), with new exchange contract addresses. The old code was internally consistent and "verified" against that legacy stack, which is exactly why this is worth calling out explicitly: verifying against a real API doesn't catch it having been superseded. Both files were rewritten against the current stack — see git history if you want the contrast.
+
+**Because of #2: fund your wallet through polymarket.com's own deposit flow, not by sending raw USDC to the address and expecting this code to convert it.** Depositing correctly (native USDC or USDC.e → pUSD) is Polymarket's own UI's job; `check_wallet.py` only reads your resulting pUSD balance, it doesn't wrap anything for you.
 
 ## What I need from you
 
@@ -29,12 +34,11 @@ One correction from earlier: Gamma's `restricted` field looked like a useful "sk
    ```
    This makes one real call and prints the real response shape — worth running before trusting anything else here.
 
-2. **If/when you want live trading** (optional — paper trading needs none of this): a Polygon wallet funded with USDC and a little MATIC for gas. **Never paste a private key into a chat with me or any AI assistant** — set `POLYGON_WALLET_PRIVATE_KEY` directly in your own `.env`. Then:
+2. **If/when you want live trading** (optional — paper trading needs none of this): a Polygon wallet with a little MATIC for gas, deposited into **through polymarket.com directly** (connect the wallet there, use their deposit flow — it correctly converts your USDC into pUSD, which nothing in this repo does for you). **Never paste a private key into a chat with me or any AI assistant** — set `POLYGON_WALLET_PRIVATE_KEY` directly in your own `.env`. Then:
    ```bash
-   python scripts/check_wallet.py --address 0xYourAddress   # read-only, no key needed
-   python scripts/onboard_wallet.py                          # needs the private key, sends approval txs
+   python scripts/check_wallet.py --address 0xYourAddress   # read-only, no key needed — confirms pUSD landed
    ```
-   If you funded your account through the Polymarket UI (email/Magic login or a browser wallet) rather than importing a raw private key, you're on a proxy wallet — set `POLYMARKET_SIGNATURE_TYPE=1` (email) or `2` (browser wallet) and `POLYMARKET_FUNDER_ADDRESS` to your actual Polymarket deposit address (check polygonscan — it won't match your signing key's address in that case). Default is `0` (EOA — you trade directly from the key's own address).
+   There's no separate approval step to run — `polymarket-client` sets any missing token allowance itself the first time you place an order, using the same signing key. Set `POLYMARKET_FUNDER_ADDRESS` if your trading wallet differs from your signing key's own address (matches the old CLOB's "funder" concept); leave it unset otherwise.
 
 ## Architecture
 
@@ -46,7 +50,7 @@ risk_manager   -> fractional-Kelly sizing, exposure/loss caps
 Executor       -> paper-trade (default) or place a live CLOB order
 Ledger         -> append-only trade log
 reconcile      -> realized PnL (resolved markets) + unrealized PnL (mark-to-market)
-onboarding     -> read-only wallet check + USDC/CTF approval transactions
+onboarding     -> read-only pUSD/MATIC balance check
 Reflex         -> orchestrates the scan -> decide -> size -> execute loop
 ```
 
@@ -63,9 +67,9 @@ Reflex         -> orchestrates the scan -> decide -> size -> execute loop
 ## Setup
 
 ```bash
-pip install -e ".[dev]"        # add "[live]" too for py-clob-client + web3 (wallet/execution)
+pip install -e ".[dev]"        # add "[live]" too for polymarket-client + web3 (wallet/execution)
 cp .env.example .env           # fill in TYPESAFE_API_KEY at minimum
-pytest                         # 30 tests, decision logic + parsing, no network calls
+pytest                         # decision logic + parsing, no network calls
 python scripts/smoke_test_jev.py   # one real Jev call — needs your key
 python scripts/run.py --once --verbose   # one scan-and-trade cycle, paper mode by default
 ```
@@ -83,6 +87,7 @@ Jev's `Noul` question only reasons over whatever `state` you hand it — today t
 - `executor.py`'s live order path is verified for construction, not for an actual fill — confirm against your own account before trusting it with size.
 - `reconcile.unrealized_pnl_since` prices at the best bid, which is conservative but not necessarily what you'd actually get selling into size.
 - No process supervision beyond the top-level retry loop in `run_forever` — run it under something (systemd, a container restart policy) that will restart it if it dies.
+- This stack (`polymarket-client`, pUSD, the current exchange contracts) was current as of 2026-09-19. Given Polymarket had already deprecated one full SDK generation by the time this was built, don't assume this stays current indefinitely — re-verify against `docs.polymarket.com` if things stop working.
 
 ## Disclaimer
 
