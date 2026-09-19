@@ -1,0 +1,23 @@
+[project]
+name = "poly-jev"
+version = "0.1.0"
+description = "Reflex: a short-horizon yes/no trading agent for Polymarket, powered by TypeSafe AI's Jev system-one model."
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+live = ["py-clob-client>=0.19"]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reflex"]
