@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# Loads .env into the process environment on first import — the rest of
+# this module (and the CLI scripts) just read os.environ as normal.
+load_dotenv()
+
 
 def _env_float(name: str, default: float) -> float:
     return float(os.environ.get(name, default))
