@@ -22,6 +22,14 @@ class BinaryMarket:
     volume_usd: float
     yes_token_id: str
     no_token_id: str
+    tick_size: float
+    min_order_size: float
+    # Gamma's `restricted` flag is undocumented and was `true` on 100/100
+    # markets sampled while building this — it has no discriminative value,
+    # so it's captured but never filtered on. Check Polymarket's terms and
+    # your own jurisdiction's legal status yourself before trading live.
+    restricted: bool
+    neg_risk: bool
 
     @property
     def hours_to_resolution(self) -> float:
@@ -31,7 +39,13 @@ class BinaryMarket:
 
 class GammaClient:
     """Read-only access to Polymarket's Gamma API for market discovery and
-    resolution status. No auth required."""
+    resolution status. No auth required.
+
+    Schema verified live against https://gamma-api.polymarket.com on
+    2026-09-19 — field names below (outcomes, outcomePrices, clobTokenIds,
+    liquidityNum, volumeNum, orderPriceMinTickSize, orderMinSize, restricted)
+    match a real market response, not just documentation.
+    """
 
     def __init__(self, settings: Settings, session: requests.Session | None = None):
         self._settings = settings
@@ -83,6 +97,38 @@ class GammaClient:
         return None
 
 
+class ClobMarketData:
+    """Read-only access to Polymarket's public CLOB endpoints — no auth
+    required. Verified live against https://clob.polymarket.com on
+    2026-09-19 (/price, /book, /tick-size all confirmed reachable and
+    correctly shaped against a real token id).
+
+    Used to get an executable price right before sizing/placing an order,
+    since the Gamma `yes_price`/`no_price` snapshot can be stale, and to
+    mark open positions to market for the daily-loss kill switch.
+    """
+
+    def __init__(self, settings: Settings, session: requests.Session | None = None):
+        self._settings = settings
+        self._session = session or requests.Session()
+
+    def get_price(self, token_id: str, side: str) -> float | None:
+        resp = self._session.get(
+            f"{self._settings.clob_base_url}/price",
+            params={"token_id": token_id, "side": side},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        return float(resp.json()["price"])
+
+    def get_best_bid(self, token_id: str) -> float | None:
+        return self.get_price(token_id, "SELL")
+
+    def get_best_ask(self, token_id: str) -> float | None:
+        return self.get_price(token_id, "BUY")
+
+
 def _maybe_parse_json(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
@@ -121,4 +167,8 @@ def _parse_binary_market(raw: dict[str, Any]) -> BinaryMarket | None:
         volume_usd=float(raw.get("volumeNum", raw.get("volume", 0)) or 0),
         yes_token_id=str(token_ids[0]),
         no_token_id=str(token_ids[1]),
+        tick_size=float(raw.get("orderPriceMinTickSize", 0.01) or 0.01),
+        min_order_size=float(raw.get("orderMinSize", 5) or 5),
+        restricted=bool(raw.get("restricted", False)),
+        neg_risk=bool(raw.get("negRisk", False)),
     )

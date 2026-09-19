@@ -23,4 +23,8 @@ def make_market(
         volume_usd=volume,
         yes_token_id="yes-token",
         no_token_id="no-token",
+        tick_size=0.01,
+        min_order_size=5.0,
+        restricted=False,
+        neg_risk=False,
     )

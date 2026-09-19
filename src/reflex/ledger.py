@@ -15,6 +15,7 @@ class Fill:
     condition_id: str
     question: str
     side: str
+    token_id: str
     price: float
     size_usd: float
     mode: str
@@ -27,6 +28,7 @@ class Fill:
             condition_id=order.condition_id,
             question=order.question,
             side=order.side,
+            token_id=order.token_id,
             price=order.price,
             size_usd=order.size_usd,
             mode="paper",
@@ -39,6 +41,7 @@ class Fill:
             condition_id=order.condition_id,
             question=order.question,
             side=order.side,
+            token_id=order.token_id,
             price=order.price,
             size_usd=order.size_usd,
             mode="live",

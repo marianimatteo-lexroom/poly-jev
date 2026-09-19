@@ -25,18 +25,25 @@ def _env_str(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    # Jev / TypeSafe
+    # Jev / TypeSafe. Only the key is read here — TypeSafeClient manages
+    # TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL itself (see jev_client.py).
     typesafe_api_key: str = field(default_factory=lambda: _env_str("TYPESAFE_API_KEY", ""))
-    jev_model: str = field(default_factory=lambda: _env_str("JEV_MODEL", "jev-latest"))
-    typesafe_base_url: str = field(
-        default_factory=lambda: _env_str("TYPESAFE_BASE_URL", "https://api.typesafe.ai/v1/systemone")
-    )
 
     # Polymarket
     gamma_base_url: str = field(default_factory=lambda: _env_str("GAMMA_BASE_URL", "https://gamma-api.polymarket.com"))
     clob_base_url: str = field(default_factory=lambda: _env_str("CLOB_BASE_URL", "https://clob.polymarket.com"))
+    # polygon-rpc.com and several other "free public" RPCs returned 401s
+    # (disabled/gated) when this was tested on 2026-09-19 — this one
+    # actually worked, verified live. Swap it if it stops working for you.
+    polygon_rpc_url: str = field(
+        default_factory=lambda: _env_str("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
+    )
     polygon_private_key: str = field(default_factory=lambda: _env_str("POLYGON_WALLET_PRIVATE_KEY", ""))
     polymarket_funder: str = field(default_factory=lambda: _env_str("POLYMARKET_FUNDER_ADDRESS", ""))
+    # 0 = EOA (you trade directly from the private key's own address).
+    # 1 = email/magic-link wallet proxy. 2 = browser-wallet (Gnosis Safe) proxy.
+    # Polymarket UI signups default to a proxy wallet (1 or 2) — see README.
+    polymarket_signature_type: int = field(default_factory=lambda: _env_int("POLYMARKET_SIGNATURE_TYPE", 0))
 
     # Safety / mode — refuse to trade for real unless explicitly told to.
     dry_run: bool = field(default_factory=lambda: _env_bool("DRY_RUN", True))

@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 from . import edge_engine, reconcile, risk_manager
 from .config import Settings, load_settings
-from .executor import Executor, OrderRequest
+from .executor import Executor, ExecutorError, OrderRequest
 from .jev_client import JevClient
 from .ledger import Ledger
-from .polymarket_client import GammaClient
+from .polymarket_client import ClobMarketData, GammaClient
 
 logger = logging.getLogger("reflex")
 
@@ -25,6 +25,7 @@ class Reflex:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or load_settings()
         self.gamma = GammaClient(self.settings)
+        self.clob_data = ClobMarketData(self.settings)
         self.jev = JevClient(self.settings)
         self.ledger = Ledger(self.settings.ledger_path)
         self.executor = Executor(self.settings, self.ledger)
@@ -34,8 +35,10 @@ class Reflex:
         candidates = [m for m in markets if self._in_horizon(m)]
         logger.info("scanned %d markets, %d in short-horizon window", len(markets), len(candidates))
 
-        realized_pnl = reconcile.realized_pnl_since(self.ledger, self.gamma, _start_of_day_utc_ts())
-        daily_loss = max(0.0, -realized_pnl)
+        since_ts = _start_of_day_utc_ts()
+        realized_pnl = reconcile.realized_pnl_since(self.ledger, self.gamma, since_ts)
+        unrealized_pnl = reconcile.unrealized_pnl_since(self.ledger, self.gamma, self.clob_data, since_ts)
+        daily_loss = max(0.0, -(realized_pnl + unrealized_pnl))
 
         placed: list[OrderRequest] = []
         for market in candidates:
@@ -53,7 +56,14 @@ class Reflex:
                 continue
 
             token_id = market.yes_token_id if signal.side == "YES" else market.no_token_id
-            price = market.yes_price if signal.side == "YES" else market.no_price
+
+            # Re-check the executable price right before sizing/ordering — the
+            # Gamma snapshot Jev priced against can already be stale.
+            live_price = self.clob_data.get_best_ask(token_id)
+            price = live_price if live_price is not None else (
+                market.yes_price if signal.side == "YES" else market.no_price
+            )
+
             order = OrderRequest(
                 condition_id=market.condition_id,
                 question=market.question,
@@ -61,8 +71,16 @@ class Reflex:
                 token_id=token_id,
                 price=price,
                 size_usd=size,
+                tick_size=market.tick_size,
+                min_order_size=market.min_order_size,
+                neg_risk=market.neg_risk,
             )
-            self.executor.execute(order)
+            try:
+                self.executor.execute(order)
+            except ExecutorError:
+                logger.warning("skipped %s — order rejected pre-flight", market.condition_id, exc_info=True)
+                continue
+
             placed.append(order)
             logger.info(
                 "placed %s $%.2f @ %.3f (fair=%.3f edge=%.3f conf=%.2f) — %s",

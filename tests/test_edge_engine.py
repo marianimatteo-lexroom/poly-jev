@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 from factories import make_market
 
 from reflex import edge_engine
 from reflex.config import Settings
-from reflex.jev_client import Answer, JevResponse
+
+
+@dataclass(frozen=True)
+class _FakeNoulAnswer:
+    noul: float
+
+
+@dataclass(frozen=True)
+class _FakeResponse:
+    nouls: dict[str, _FakeNoulAnswer]
 
 
 class FakeJevClient:
+    """Stands in for `reflex.jev_client.JevClient`, matching the shape of
+    the real `typesafe_sdk.SystemOneResponse` (`.nouls[key].noul`) that
+    `edge_engine.evaluate_market` actually reads — verified against the
+    real SDK in `jev_client.py`, not guessed here."""
+
     def __init__(self, resolves_yes: float, manipulation_risk: float):
         self._resolves_yes = resolves_yes
         self._manipulation_risk = manipulation_risk
@@ -16,12 +32,11 @@ class FakeJevClient:
 
     def ask(self, state, questions):
         self.calls.append((state, questions))
-        return JevResponse(
-            model="jev-test",
-            answers={
-                "resolves_yes": Answer({"noul": self._resolves_yes}),
-                "manipulation_risk": Answer({"noul": self._manipulation_risk}),
-            },
+        return _FakeResponse(
+            nouls={
+                "resolves_yes": _FakeNoulAnswer(self._resolves_yes),
+                "manipulation_risk": _FakeNoulAnswer(self._manipulation_risk),
+            }
         )
 
 

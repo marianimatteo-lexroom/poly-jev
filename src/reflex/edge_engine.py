@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import Settings
-from .jev_client import JevClient, noul
+from .jev_client import JevClient, Noul
 from .polymarket_client import BinaryMarket
 
 
@@ -44,24 +44,28 @@ def evaluate_market(client: JevClient, settings: Settings, market: BinaryMarket)
     response = client.ask(
         state=state,
         questions={
-            "resolves_yes": noul(
-                "Given everything you know about the world and the state "
-                "provided, estimate the true probability that this market "
-                "resolves YES. Ignore the current market price — judge the "
-                "underlying question on its merits."
+            "resolves_yes": Noul(
+                instructions=(
+                    "Given everything you know about the world and the state "
+                    "provided, estimate the true probability that this market "
+                    "resolves YES. Ignore the current market price — judge the "
+                    "underlying question on its merits."
+                )
             ),
-            "manipulation_risk": noul(
-                "There are signs this market is thinly traded, manipulated, "
-                "or otherwise unsafe to trade right now: ambiguous "
-                "resolution criteria, liquidity that's very low relative to "
-                "volume, or a question that looks already effectively "
-                "decided but mispriced due to inattention."
+            "manipulation_risk": Noul(
+                instructions=(
+                    "There are signs this market is thinly traded, manipulated, "
+                    "or otherwise unsafe to trade right now: ambiguous "
+                    "resolution criteria, liquidity that's very low relative to "
+                    "volume, or a question that looks already effectively "
+                    "decided but mispriced due to inattention."
+                )
             ),
         },
     )
 
-    fair_p = response.answers["resolves_yes"].noul
-    risk = response.answers["manipulation_risk"].noul
+    fair_p = response.nouls["resolves_yes"].noul
+    risk = response.nouls["manipulation_risk"].noul
     if risk > settings.max_manipulation_risk:
         return None
 
