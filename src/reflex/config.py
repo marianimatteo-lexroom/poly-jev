@@ -56,13 +56,13 @@ class Settings:
 
     # Universe filters — what counts as "short horizon".
     min_hours_to_resolution: float = field(default_factory=lambda: _env_float("MIN_HOURS_TO_RESOLUTION", 0.5))
-    max_hours_to_resolution: float = field(default_factory=lambda: _env_float("MAX_HOURS_TO_RESOLUTION", 48.0))
+    max_hours_to_resolution: float = field(default_factory=lambda: _env_float("MAX_HOURS_TO_RESOLUTION", 168.0))
     min_liquidity_usd: float = field(default_factory=lambda: _env_float("MIN_LIQUIDITY_USD", 2000.0))
     min_volume_usd: float = field(default_factory=lambda: _env_float("MIN_VOLUME_USD", 5000.0))
 
-    # Edge / decision thresholds.
+    # Edge / decision thresholds. Manipulation risk is the sole risk gate;
+    # derived confidence (1 - risk) is logged on TradeSignal, not gated on.
     min_edge: float = field(default_factory=lambda: _env_float("MIN_EDGE", 0.05))
-    min_edge_confidence: float = field(default_factory=lambda: _env_float("MIN_EDGE_CONFIDENCE", 0.6))
     max_manipulation_risk: float = field(default_factory=lambda: _env_float("MAX_MANIPULATION_RISK", 0.35))
 
     # Risk / sizing.

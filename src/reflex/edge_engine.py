@@ -37,8 +37,9 @@ def evaluate_market(client: JevClient, settings: Settings, market: BinaryMarket)
     """Asks Jev for a fair-value probability and a manipulation-risk flag,
     then decides whether the gap to the market price is worth trading.
 
-    Returns None when there's no trade: risk too high, edge too small, or
-    confidence too low.
+    Returns None when there's no trade: manipulation risk too high or
+    edge too small. Confidence (1 - risk) is recorded on the signal for
+    logging only — it is not a second gate.
     """
     state = build_state(market)
     response = client.ask(
@@ -79,15 +80,11 @@ def evaluate_market(client: JevClient, settings: Settings, market: BinaryMarket)
     else:
         return None
 
-    confidence = 1.0 - risk
-    if confidence < settings.min_edge_confidence:
-        return None
-
     return TradeSignal(
         market=market,
         side=side,
         fair_probability=fair_p,
         market_price=market_p,
         edge=edge,
-        confidence=confidence,
+        confidence=1.0 - risk,
     )

@@ -19,7 +19,7 @@ class Reflex:
 
     Its only goal is making money: scan short-horizon binary markets, ask
     Jev for a fair-value probability on each, and trade the gap against the
-    market price whenever the edge, confidence, and risk limits all clear.
+    market price whenever the edge and manipulation-risk limits all clear.
     """
 
     def __init__(self, settings: Settings | None = None):

@@ -41,7 +41,7 @@ class FakeJevClient:
 
 
 def default_settings(**overrides) -> Settings:
-    base = dict(min_edge=0.05, min_edge_confidence=0.6, max_manipulation_risk=0.35)
+    base = dict(min_edge=0.05, max_manipulation_risk=0.35)
     base.update(overrides)
     return Settings(**base)
 
@@ -87,9 +87,17 @@ def test_skips_when_manipulation_risk_too_high():
     assert edge_engine.evaluate_market(client, settings, market) is None
 
 
-def test_skips_when_confidence_too_low():
+def test_does_not_gate_on_derived_confidence():
+    """Risk of 0.3 is under max_manipulation_risk=0.35, so the trade proceeds.
+    Derived confidence (1 - risk = 0.7) is recorded for logging and is not a
+    second gate — previously a duplicate confidence threshold would have skipped
+    this signal."""
     market = make_market(yes_price=0.40)
     client = FakeJevClient(resolves_yes=0.60, manipulation_risk=0.3)
-    settings = default_settings(min_edge_confidence=0.75)
+    settings = default_settings()
 
-    assert edge_engine.evaluate_market(client, settings, market) is None
+    signal = edge_engine.evaluate_market(client, settings, market)
+
+    assert signal is not None
+    assert signal.side == "YES"
+    assert signal.confidence == pytest.approx(0.7)
