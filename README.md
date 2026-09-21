@@ -76,7 +76,7 @@ python scripts/run.py --once --verbose   # one scan-and-trade cycle, paper mode 
 
 ## Configuration
 
-Everything is an environment variable — see `.env.example` for the full list: universe filters (what counts as "short horizon"), edge/confidence thresholds, risk limits, and wallet/signature settings.
+Everything is an environment variable — see `.env.example` for the full list: universe filters (what counts as "short horizon", defaulting to markets resolving within 7 days), edge and `MAX_MANIPULATION_RISK` thresholds, risk limits, and wallet/signature settings.
 
 ## Extending the edge
 
